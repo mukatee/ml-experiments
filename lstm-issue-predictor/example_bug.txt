@@ -1,0 +1,2 @@
+copy your favourite bug report description here from bugreports.qt.io
+(for project QTBUG or whichever you train on).
