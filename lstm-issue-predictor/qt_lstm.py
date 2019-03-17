@@ -15,13 +15,14 @@ from keras.models import Model
 from sklearn.model_selection import train_test_split
 from keras.layers import LSTM, CuDNNLSTM
 
-print(os.listdir("lstm"))
+print(os.listdir("data"))
 
-df_2019 = pd.read_csv("bugs2019/reduced.csv", parse_dates=["Created", "Due Date", "Resolved"])
+df_2019 = pd.read_csv("data/bugs-2019-reduced.csv", parse_dates=["Created", "Due Date", "Resolved"])
 
 counts = df_2019["comp1"].value_counts()
 
-df_2019 = df_2019[df_2019['comp1'].isin(counts[counts > 3].index)]
+min_count = 10
+df_2019 = df_2019[df_2019['comp1'].isin(counts[counts >= min_count].index)]
 
 df_2019 = df_2019.reset_index()
 
@@ -63,7 +64,7 @@ def load_word_vectors(glove_dir):
     print('Found %s word vectors.' % len(embeddings_index))
     return embeddings_index
 
-def tokenize_text(vocab_size, texts, labels, seq_length):
+def tokenize_text(vocab_size, texts, seq_length):
     tokenizer = Tokenizer(num_words=vocab_size)
     tokenizer.fit_on_texts(texts)
     sequences = tokenizer.texts_to_sequences(texts)
@@ -74,20 +75,22 @@ def tokenize_text(vocab_size, texts, labels, seq_length):
     X = pad_sequences(sequences, maxlen=seq_length)
     #to_categorical converst vector of class labels (0 to N ints) to binary matrix
     #see keras docs for more info
-    y = to_categorical(labels)
+#    y = to_categorical(labels)
     print('Shape of data tensor:', X.shape)
-    print('Shape of label tensor:', y.shape)
+#    print('Shape of label tensor:', y.shape)
 
-    return data, X, y, tokenizer
+    return data, X, tokenizer
+
 
 def train_val_test_split(X, y):
-
-    X_train, X_test_val, y_train,  y_test_val = train_test_split(X, y,
-                                                                 test_size=0.2,
-                                                                 random_state=42)
+    X_train, X_test_val, y_train, y_test_val = train_test_split(X, y,
+                                                                test_size=0.2,
+                                                                random_state=42,
+                                                                stratify=y)
     X_val, X_test, y_val, y_test = train_test_split(X_test_val, y_test_val,
                                                     test_size=0.25,
-                                                    random_state=42)
+                                                    random_state=42,
+                                                    stratify=y_test_val)
     return X_train, y_train, X_val, y_val, X_test, y_test
 
 def embedding_index_to_matrix(embeddings_index, vocab_size, embedding_dim, word_index):
@@ -105,9 +108,13 @@ def embedding_index_to_matrix(embeddings_index, vocab_size, embedding_dim, word_
             embedding_matrix[i] = embedding_vector
     return embedding_matrix
 
-def build_model_lstm(vocab_size, embedding_dim, sequence_length, cat_count):
+def build_model_lstm(vocab_size, embedding_dim, embedding_matrix, sequence_length, cat_count):
     input = Input(shape=(sequence_length,), name="Input")
-    embedding = Embedding(input_dim=vocab_size, output_dim=embedding_dim, input_length=sequence_length,
+    embedding = Embedding(input_dim=vocab_size,
+                          weights=[embedding_matrix],
+                          output_dim=embedding_dim,
+                          input_length=sequence_length,
+                          trainable=False,
                           name="embedding")(input)
     lstm1_bi1 = Bidirectional(LSTM(128, return_sequences=True, name='lstm1'), name="lstm-bi1")(embedding)
     drop1 = Dropout(0.2, name="drop1")(lstm1_bi1)
@@ -118,9 +125,13 @@ def build_model_lstm(vocab_size, embedding_dim, sequence_length, cat_count):
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
-def build_model_lstm_cuda(vocab_size, embedding_dim, sequence_length, cat_count):
+def build_model_lstm_cuda(vocab_size, embedding_dim, embedding_matrix, sequence_length, cat_count):
     input = Input(shape=(sequence_length,), name="Input")
-    embedding = Embedding(input_dim=vocab_size, output_dim=embedding_dim, input_length=sequence_length,
+    embedding = Embedding(input_dim=vocab_size,
+                          output_dim=embedding_dim,
+                          weights=[embedding_matrix],
+                          input_length=sequence_length,
+                          trainable=False,
                           name="embedding")(input)
     lstm1_bi1 = Bidirectional(CuDNNLSTM(128, return_sequences=True, name='lstm1'), name="lstm-bi1")(embedding)
     drop1 = Dropout(0.2, name="drop1")(lstm1_bi1)
@@ -131,16 +142,24 @@ def build_model_lstm_cuda(vocab_size, embedding_dim, sequence_length, cat_count)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     return model
 
-glove_dir = "lstm"
+glove_dir = "data"
 embeddings_index = load_word_vectors(glove_dir)
 
 data = df_2019["Description"]
 vocab_size = 20000
 seq_length = 1000
-data, X, y, tokenizer = tokenize_text(vocab_size, data, df_2019["comp1_label"], seq_length)
+data, X, tokenizer = tokenize_text(vocab_size, data, seq_length)
+
+y = df_2019["comp1_label"]
+X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(X, y)
+
+y_train = to_categorical(y_train)
+y_val = to_categorical(y_val)
+y_test = to_categorical(y_test)
+
+#because split 0.8 puts 3 of lottie in train and 1 in test_val, need more than 4
 
 #https://raw.githubusercontent.com/PacktPublishing/Deep-Learning-Quick-Reference/master/Chapter10/newsgroup_classifier_pretrained_word_embeddings.py
-X_train, y_train, X_val, y_val, X_test, y_test = train_val_test_split(X, y)
 embedding_dim = 300
 embedding_matrix = embedding_index_to_matrix(embeddings_index=embeddings_index,
                                                      vocab_size=vocab_size,
@@ -150,12 +169,33 @@ embedding_matrix = embedding_index_to_matrix(embeddings_index=embeddings_index,
 model = build_model_lstm(vocab_size=vocab_size,
                     embedding_dim=embedding_dim,
                     sequence_length=seq_length,
-#                    embedding_matrix=embedding_matrix,
-                   cat_count=168) #TODO: get this number from encoder
+                    embedding_matrix=embedding_matrix,
+                   cat_count=len(encoder.classes_))
 
-model.load_weights('lstm/model-lstm-11-epoch.hdf5')
+model.load_weights('data/model-lstm-weights.hdf5')
 
-#model = build_model(vocab_size=vocab_size,
+
+def train_model(name):
+    from keras.callbacks import TensorBoard, ModelCheckpoint
+
+    checkpoint_callback = ModelCheckpoint(filepath="./model-weights" + name + ".{epoch:02d}-{val_loss:.6f}.hdf5",
+                                          monitor='val_loss', verbose=0, save_best_only=True)
+
+    model.fit(X_train, y_train,
+              batch_size=128,
+              epochs=15,
+              validation_data=(X_val, y_val),
+              callbacks=[checkpoint_callback])
+
+    model.save("issue_model_word_embedding.h5")
+
+    score, acc = model.evaluate(x=X_test,
+                                y=y_test,
+                                batch_size=128)
+    print('Test loss:', score)
+    print('Test accuracy:', acc)
+
+#model = build_model_lstm_cuda(vocab_size=vocab_size,
 #                    embedding_dim=embedding_dim,
 #                    sequence_length=seq_length,
 #                    embedding_matrix=embedding_matrix,
@@ -173,6 +213,8 @@ model.load_weights('lstm/model-lstm-11-epoch.hdf5')
 #                            batch_size=128)
 #print('Test loss:', score)
 #print('Test accuracy:', acc)
+
+#train_model("issue-model")
 
 #which integer matches which textual label/component name
 le_id_mapping = dict(zip(encoder.transform(encoder.classes_), encoder.classes_))
