@@ -4,12 +4,13 @@ import numpy as np
 import pandas as pd
 from hyperopt import hp, tpe, Trials
 from hyperopt.fmin import fmin
-import lightgbm as lgbm
+import catboost
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import StratifiedKFold
 import hyperopt
 import test_predictor
 import opt_utils
+from sklearn.metrics import accuracy_score
 
 def fit_cv(X, y, params, fit_params):
     score = 0
@@ -19,75 +20,58 @@ def fit_cv(X, y, params, fit_params):
     for i, (train_index, test_index) in enumerate(folds.split(X, y)):
         print('-' * 20, i, '-' * 20)
 
-        clf = lgbm.LGBMClassifier(**params)
+        #https://github.com/Koziev/MNIST_Boosting/blob/master/catboost_hyperopt_solver.py
         X_train, y_train = X.iloc[train_index], y[train_index]
         X_test, y_test = X.iloc[test_index], y[test_index]
+        #https://catboost.ai/docs/concepts/python-reference_parameters-list.html#python-reference_parameters-list
+        clf = catboost.CatBoostClassifier(**params)
+
         # verbose = print loss at every "verbose" rounds
-        clf.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=1000, **fit_params)
+        clf.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=100, **fit_params)
         oof_preds = np.zeros((X.shape[0]))
-        oof_preds[test_index] = clf.predict(X.iloc[test_index])
-        score += clf.score(X.iloc[test_index], y[test_index])
-        print('score ', clf.score(X.iloc[test_index], y[test_index]))
+        predictions = clf.predict(X.iloc[test_index])
+        oof_preds[test_index] = predictions.flatten()
+        iter_score = accuracy_score(oof_preds[test_index], y[test_index])
+        score += iter_score
+        print('score: {}'.format(iter_score))
         importances = clf.feature_importances_
         features = X.columns
     return score / n_folds
 
 
 def objective_sklearn(params):
-    int_types = ["num_leaves", "min_child_samples", "subsample_for_bin", "min_data_in_leaf"]
+    int_types = ["depth"]
     params = opt_utils.convert_int_params(int_types, params)
+    params["objective"] = "MultiClass"
+    params["eval_metric"] = "Accuracy"
+    params["iterations"] = 1000
+    params["early_stopping_rounds"] = 10
+    if params['bootstrap_type'].lower() != "bayesian":
+        #catboost gives error if bootstrap option defined with bootstrap disabled
+        del params['bagging_temperature']
 
-    params['colsample_bytree'] = '{:.3f}'.format(params['colsample_bytree'])
-    # Retrieve the subsample if present otherwise set to 1.0
-    subsample = params['boosting_type'].get('subsample', 1.0)
-
-    # Extract the boosting type
-    params['boosting_type'] = params['boosting_type']['boosting_type']
-    params['subsample'] = subsample
-    #    print("running with params:"+str(params))
-
-    using_dart = params['boosting_type'] == "dart"
-
-    fit_params = {"eval_metric": "multi_logloss"}
-    if using_dart:
-        n_estimators = 500
-    else:
-        n_estimators = 10000
-        fit_params["early_stopping_rounds"] = 100
-    params["n_estimators"] = n_estimators
-    score = fit_cv(X, y, params, fit_params)
+    score = fit_cv(X, y, params, {})
     print("Score {:.3f} params {}".format(score, params))
     loss = 1 - score
     result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
     return result
 
-def optimize_lgbm():
+def optimize_catboost():
     # https://github.com/Microsoft/LightGBM/blob/master/docs/Parameters.rst
     #https://indico.cern.ch/event/617754/contributions/2590694/attachments/1459648/2254154/catboost_for_CMS.pdf
     space = {
-        'class_weight': hp.choice('class_weight', [None, 'balanced']),
-        'boosting_type': hp.choice('boosting_type',
-                                   [{'boosting_type': 'gbdt',
-                                     'subsample': hp.uniform('gdbt_subsample', 0.5, 1)},
-                                    {'boosting_type': 'dart',
-                                     'subsample': hp.uniform('dart_subsample', 0.5, 1)},
-                                    {'boosting_type': 'goss'}]),
-        'num_leaves': hp.quniform('num_leaves', 30, 150, 1),
-        #what is negative value for?
-        #'learning_rate': hp.loguniform('learning_rate', -7, 0),
+        #'shrinkage': hp.loguniform('shrinkage', -7, 0),
+        'depth': hp.quniform('depth', 2, 10, 1),
+        'rsm': hp.uniform('rsm', 0.5, 1),
         'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(0.2)),
-        'subsample_for_bin': hp.quniform('subsample_for_bin', 20000, 300000, 20000),
-        'min_child_samples': hp.quniform('min_child_samples', 20, 500, 5),
-        'feature_fraction': hp.uniform('feature_fraction', 0.5, 1),
-        'bagging_fraction': hp.uniform('bagging_fraction', 0.5, 1),
-        'min_data_in_leaf': hp.qloguniform('min_data_in_leaf', 0, 6, 1),
-        'min_sum_hessian_in_leaf': hp.loguniform('min_sum_hessian_in_leaf', -16, 5),
-        'lambda_l1': hp.choice('lambda_l1', [0, hp.loguniform('lambda_l1_positive', -16, 2)]),
-        'lambda_l2': hp.choice('lambda_l2', [0, hp.loguniform('lambda_l2_positive', -16, 2)]),
-        'reg_alpha': hp.uniform('reg_alpha', 0.0, 1.0),
-        'reg_lambda': hp.uniform('reg_lambda', 0.0, 1.0),
-        'colsample_bytree': hp.uniform('colsample_by_tree', 0.6, 1.0),
-        'objective': "multiclass", "num_class": 9
+        'border_count': hp.qloguniform('border_count', np.log(32), np.log(255), 1),
+        #'ctr_border_count': hp.qloguniform('ctr_border_count', np.log(32), np.log(255), 1),
+        'l2_leaf_reg': hp.quniform('l2_leaf_reg', 0, 5, 1),
+        'leaf_estimation_method': hp.choice('leaf_estimation_method', ['Newton', 'Gradient']),
+        'bootstrap_type': hp.choice('bootstrap_type', ['Bayesian', 'Bernoulli', 'No']), #Poisson also possible for GPU
+        'bagging_temperature': hp.loguniform('bagging_temperature', np.log(1), np.log(3)),
+        'use_best_model': True
+        #'gradient_iterations': hp.quniform('gradient_iterations', 1, 100, 1),
     }
     trials = Trials()
     best = fmin(fn=objective_sklearn,
@@ -122,16 +106,16 @@ if __name__== "__main__":
     #df_test_sum.drop(cols_to_drop, axis=1, inplace=True)
     X = df_train_sum
 
-    params = optimize_lgbm()
+    params = optimize_catboost()
     print(params)
 
-    clf = lgbm.LGBMClassifier(**params)
+    clf = catboost.CatBoostClassifier(**params)
 
     search_results = test_predictor.stratified_test_prediction_avg_vote(clf, df_train_sum, df_test_sum, y)
     predictions = search_results["predictions"]
 
     ss = pd.read_csv('../input/career-con-2019/sample_submission.csv')
     ss['surface'] = encoder.inverse_transform(predictions.argmax(axis=1))
-    ss.to_csv('lgbm.csv', index=False)
+    ss.to_csv('catboost.csv', index=False)
     ss.head(10)
 

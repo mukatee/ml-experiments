@@ -17,8 +17,8 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y):
     for i, (train_index, test_index) in enumerate(folds.split(X_train, y)):
         print('-' * 20, i, '-' * 20)
 
-        clf.fit(X_train.iloc[train_index], y[train_index])
-        oof_preds[test_index] = clf.predict(X_train.iloc[test_index])
+        clf.fit(X_train.iloc[train_index], y[train_index], eval_set=(X_train.iloc[test_index], y[test_index]), verbose=0)
+        oof_preds[test_index] = clf.predict(X_train.iloc[test_index]).flatten()
         sub_preds += clf.predict_proba(X_test) / folds.n_splits
         score += clf.score(X_train.iloc[test_index], y[test_index])
         print('score ', clf.score(X_train.iloc[test_index], y[test_index]))
@@ -50,3 +50,16 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y):
         "predictions": sub_preds
     }
     return result
+
+def full_train_predict(clf, X_train, X_test, y):
+    pass
+
+def avg_vote(predictions):
+    pass
+
+def avg_multi_vote(predictions):
+    pass
+
+def majority_vote(predictions):
+    pass
+
