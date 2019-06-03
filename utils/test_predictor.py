@@ -5,14 +5,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set):
-    folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=69)
-    #9 columns, one per target label. each contains probability of that value
-    sub_preds = np.zeros((X_test.shape[0], 9))
+def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n_folds, n_classes, fit_params):
+    folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=69)
+    #N columns, one per target label. each contains probability of that value
+    sub_preds = np.zeros((X_test.shape[0], n_classes))
     oof_preds = np.zeros((X_train.shape[0]))
     score = 0
     misclassified_indices = []
-    misclassified_tuples_all = []
     misclassified_expected = []
     misclassified_actual = []
     for i, (train_index, test_index) in enumerate(folds.split(X_train, y)):
@@ -20,10 +19,10 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set):
 
         X_val, y_val = X_train.iloc[test_index], y[test_index]
         if use_eval_set:
-            clf.fit(X_train.iloc[train_index], y[train_index], eval_set=([(X_val, y_val)]), verbose=0)
+            clf.fit(X_train.iloc[train_index], y[train_index], eval_set=([(X_val, y_val)]), verbose=100, **fit_params)
         else:
             #random forest does not know parameter "eval_set" or "verbose"
-            clf.fit(X_train.iloc[train_index], y[train_index])
+            clf.fit(X_train.iloc[train_index], y[train_index], **fit_params)
         oof_preds[test_index] = clf.predict(X_train.iloc[test_index]).flatten()
         sub_preds += clf.predict_proba(X_test) / folds.n_splits
         score += clf.score(X_train.iloc[test_index], y[test_index])

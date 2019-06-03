@@ -1,0 +1,1 @@
+max_evals = maximum number of trials to run. causes hyperopt to stop when this number of trials has been executed.
