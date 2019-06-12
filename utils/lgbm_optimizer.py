@@ -1,3 +1,8 @@
+__author__ = 'teemu kanstren'
+
+from test_predictor import *
+from opt_utils import *
+
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 import lightgbm as lgbm
@@ -5,8 +10,6 @@ from hyperopt import hp, tpe, Trials
 from hyperopt.fmin import fmin
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
-from test_predictor import *
-from opt_utils import *
 import hyperopt
 
 # how many CV folds to do on the data
@@ -14,7 +17,7 @@ n_folds = 5
 # max number of rows to use for X and y. to reduce time and compare options faster
 max_n = None
 # max number of trials hyperopt runs
-n_trials = 10
+n_trials = 50
 verbosity = 0
 from sklearn.metrics import accuracy_score
 
@@ -210,11 +213,11 @@ def classify_binary(X_cols, df_train, df_test, y_param):
     search_results = stratified_test_prediction_avg_vote(clf, X, X_test, y, use_eval_set=True,
                                                          n_folds=n_folds, n_classes=2, fit_params=fit_params, verbosity=verbosity)
     predictions = search_results["predictions"]
+    oof_predictions = search_results["oof_predictions"]
     avg_accuracy = search_results["avg_accuracy"]
     misclassified_indices = search_results["misclassified_indices"]
     misclassified_samples_expected = search_results["misclassified_samples_expected"]
     misclassified_samples_actual = search_results["misclassified_samples_actual"]
 
-    return predictions, avg_accuracy, misclassified_indices, misclassified_samples_actual, misclassified_samples_expected
-
+    return predictions, oof_predictions, avg_accuracy, misclassified_indices
 

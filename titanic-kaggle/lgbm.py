@@ -149,13 +149,61 @@ print(X_cols)
 
 print(df_train[X_cols].head())
 
-if __name__ == "__main__":
-    lgbm_optimizer.n_trials = 5
-    predictions, _, misclassified_indices, _, _ = lgbm_optimizer.classify_binary(X_cols, df_train, df_test, y)
-    ss = pd.read_csv('gender_submission.csv')
-    # predicting only true values, so take column 1 (0 is false column)
-    np_preds = np.array(predictions)[: ,1]
-    ss["Survived"] = np.where(np_preds > 0.5, 1, 0)
-    ss.to_csv('lgbm.csv', index=False)
-    ss.head(10)
+
+
+lgbm_optimizer.n_trials = 5
+predictions, oof_predictions, _, misclassified_indices = lgbm_optimizer.classify_binary(X_cols, df_train, df_test, y)
+ss = pd.read_csv('gender_submission.csv')
+# predicting only true values, so take column 1 (0 is false column)
+np_preds = np.array(predictions)[:, 1]
+ss["Survived"] = np.where(np_preds > 0.5, 1, 0)
+ss.to_csv('lgbm.csv', index=False)
+ss.head(10)
+
+print(oof_predictions[misclassified_indices])
+
+oof_series = pd.Series(oof_predictions[misclassified_indices])
+oof_series.index = y[misclassified_indices].index
+print(oof_series)
+
+
+miss_scale_raw = y[misclassified_indices] - oof_predictions[misclassified_indices]
+miss_scale_abs = abs(miss_scale_raw)
+miss_scale = pd.concat([miss_scale_raw, miss_scale_abs, oof_series, y[misclassified_indices]], axis=1)
+miss_scale.columns = ["Raw_Diff", "Abs_Diff", "Prediction", "Actual"]
+miss_scale.head()
+
+df_miss_scale = pd.DataFrame(miss_scale)
+df_miss_scale.head()
+
+df_top_misses = df_miss_scale.sort_values(by="Abs_Diff", ascending=False)
+df_top_misses.head()
+
+print(df_top_misses.iloc[0:10])
+
+top10 = df_top_misses.iloc[0:10].index
+print(top10)
+
+print(df_train.iloc[top10])
+
+print(df_top_misses.iloc[0:10])
+
+df_bottom_misses = df_miss_scale.sort_values(by="Abs_Diff", ascending=True)
+df_bottom_misses.head()
+
+bottom10 = df_bottom_misses.iloc[0:10].index
+print(bottom10)
+
+print(df_train.iloc[bottom10])
+
+
+df_bottom_misses = df_miss_scale.sort_values(by="Abs_Diff", ascending=True)
+df_bottom_misses.head()
+
+bottom10 = df_bottom_misses.iloc[0:10].index
+print(bottom10)
+
+print(df_train.iloc[bottom10])
+
+#if __name__ == "__main__":
 
