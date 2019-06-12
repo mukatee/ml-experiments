@@ -150,6 +150,23 @@ print(X_cols)
 print(df_train[X_cols].head())
 
 
+df_losses = pd.DataFrame()
+df_losses["loss"] = lgbm_optimizer.all_losses
+df_losses["accuracy"] = lgbm_optimizer.all_accuracies
+df_losses.plot(figsize=(14,8))
+
+
+print(df_losses.head(10))
+
+print(df_losses.tail(10))
+
+print(df_losses.sort_values(by="loss", ascending=False).head(10))
+
+print(df_losses.sort_values(by="accuracy", ascending=False).head(10))
+
+print(df_losses.sort_values(by="loss", ascending=True).head(10))
+
+
 
 lgbm_optimizer.n_trials = 5
 predictions, oof_predictions, _, misclassified_indices = lgbm_optimizer.classify_binary(X_cols, df_train, df_test, y)
@@ -206,4 +223,7 @@ print(bottom10)
 print(df_train.iloc[bottom10])
 
 #if __name__ == "__main__":
+
+
+
 

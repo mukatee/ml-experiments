@@ -17,17 +17,18 @@ n_folds = 5
 # max number of rows to use for X and y. to reduce time and compare options faster
 max_n = None
 # max number of trials hyperopt runs
-n_trials = 50
+n_trials = 1000
 verbosity = 0
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, log_loss
 
 all_accuracies = []
+all_losses = []
 all_params = []
 
 
 # run n_folds of cross validation on the data
 # averages fold results
-def fit_cv(X, y, params, fit_params):
+def fit_cv(X, y, params, fit_params, n_classes):
     # cut the data if max_n is set
     if max_n is not None:
         X = X[:max_n]
@@ -39,6 +40,7 @@ def fit_cv(X, y, params, fit_params):
 
     if verbosity == 0:
         print(f"Running {n_folds} folds...")
+    oof_preds = np.zeros((X.shape[0], n_classes))
     for i, (train_index, test_index) in enumerate(folds.split(X, y)):
         if verbosity > 0:
             print('-' * 20, f"RUNNING FOLD: {i}/{n_folds}", '-' * 20)
@@ -46,21 +48,24 @@ def fit_cv(X, y, params, fit_params):
         clf = lgbm.LGBMClassifier(**params)
         X_train, y_train = X.iloc[train_index], y[train_index]
         X_test, y_test = X.iloc[test_index], y[test_index]
-        # verbose = print loss at every "verbose" rounds. if 100 it prints progress 100,200,300,... iterations
+        # verbose = print loss at every "verbose" rounds.
+        #if 100 it prints progress 100,200,300,... iterations
         clf.fit(X_train, y_train, eval_set=(X_test, y_test), verbose=verbosity, **fit_params)
-        oof_preds = np.zeros((X.shape[0]))
-        # TODO: predict_proba?
-        oof_preds[test_index] = clf.predict(X.iloc[test_index])
-        score += clf.score(X.iloc[test_index], y[test_index])
-        acc_score += accuracy_score(y[test_index], oof_preds[test_index])
+        oof_preds[test_index] = clf.predict_proba(X.iloc[test_index])
+        #score += clf.score(X.iloc[test_index], y[test_index])
+        acc_score += accuracy_score(y[test_index], oof_preds[test_index][:,1] >= 0.5)
         # print('score ', clf.score(X.iloc[test_index], y[test_index]))
         importances = clf.feature_importances_
         features = X.columns
+    #accuracy is calculated each fold so divide by n_folds.
+    #not n_folds -1 because it is not sum by row but overall sum of accuracy of all test indices
     total_acc_score = acc_score / n_folds
     all_accuracies.append(total_acc_score)
+    logloss = log_loss(y, oof_preds)
+    all_losses.append(logloss)
     all_params.append(params)
-    print(f"total acs: {total_acc_score}")
-    return score / n_folds
+    print(f"total acs: {total_acc_score}, logloss={logloss}")
+    return total_acc_score, logloss
 
 def create_fit_params(params):
     using_dart = params['boosting_type'] == "dart"
@@ -94,13 +99,18 @@ def objective_sklearn(params):
     #    print("running with params:"+str(params))
 
     fit_params = create_fit_params(params)
+    if params['objective'] == "binary":
+        n_classes = 2
+    else:
+        n_classes = params["num_class"]
 
-    score = fit_cv(X, y, params, fit_params)
+    score, logloss = fit_cv(X, y, params, fit_params, n_classes)
     if verbosity == 0:
         print("Score {:.3f}".format(score))
     else:
         print("Score {:.3f} params {}".format(score, params))
-    loss = 1 - score
+#    loss = 1 - score
+    loss = logloss
     result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
     return result
 
@@ -135,6 +145,7 @@ def optimize_lgbm(n_classes, max_n_search=None):
         space["num_class"] = n_classes
     else:
         space['objective'] = "binary"
+        #space["num_class"] = 1
 
     global max_n
     max_n = max_n_search
