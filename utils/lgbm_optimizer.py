@@ -17,14 +17,17 @@ n_folds = 5
 # max number of rows to use for X and y. to reduce time and compare options faster
 max_n = None
 # max number of trials hyperopt runs
-n_trials = 1000
+n_trials = 200
+#verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quite?
 verbosity = 0
+#if true, print summary accuracy/loss after each round
+print_summary = False
+
 from sklearn.metrics import accuracy_score, log_loss
 
 all_accuracies = []
 all_losses = []
 all_params = []
-
 
 # run n_folds of cross validation on the data
 # averages fold results
@@ -38,7 +41,7 @@ def fit_cv(X, y, params, fit_params, n_classes):
     acc_score = 0
     folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=69)
 
-    if verbosity == 0:
+    if print_summary:
         print(f"Running {n_folds} folds...")
     oof_preds = np.zeros((X.shape[0], n_classes))
     for i, (train_index, test_index) in enumerate(folds.split(X, y)):
@@ -64,7 +67,8 @@ def fit_cv(X, y, params, fit_params, n_classes):
     logloss = log_loss(y, oof_preds)
     all_losses.append(logloss)
     all_params.append(params)
-    print(f"total acs: {total_acc_score}, logloss={logloss}")
+    if print_summary:
+        print(f"total acc: {total_acc_score}, logloss={logloss}")
     return total_acc_score, logloss
 
 def create_fit_params(params):
@@ -89,13 +93,13 @@ def objective_sklearn(params):
     int_types = ["num_leaves", "min_child_samples", "subsample_for_bin", "min_data_in_leaf"]
     params = convert_int_params(int_types, params)
 
-    params['colsample_bytree'] = '{:.3f}'.format(params['colsample_bytree'])
+#    params['colsample_bytree'] = '{:.3f}'.format(params['colsample_bytree'])
     # Retrieve the subsample if present otherwise set to 1.0
     subsample = params['boosting_type'].get('subsample', 1.0)
 
     # Extract the boosting type
     params['boosting_type'] = params['boosting_type']['boosting_type']
-    params['subsample'] = subsample
+    #params['subsample'] = subsample
     #    print("running with params:"+str(params))
 
     fit_params = create_fit_params(params)
@@ -106,39 +110,51 @@ def objective_sklearn(params):
 
     score, logloss = fit_cv(X, y, params, fit_params, n_classes)
     if verbosity == 0:
-        print("Score {:.3f}".format(score))
+        if print_summary:
+            print("Score {:.3f}".format(score))
     else:
         print("Score {:.3f} params {}".format(score, params))
+    #using logloss here for the loss but uncommenting line below calculates it from average accuracy
 #    loss = 1 - score
     loss = logloss
     result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
     return result
 
-
 def optimize_lgbm(n_classes, max_n_search=None):
     # https://github.com/Microsoft/LightGBM/blob/master/docs/Parameters.rst
     # https://indico.cern.ch/event/617754/contributions/2590694/attachments/1459648/2254154/catboost_for_CMS.pdf
     space = {
+        #this is just piling on most of the possible parameter values for LGBM
+        #some of them apparently don't make sense together, but works for now.. :)
         'class_weight': hp.choice('class_weight', [None, 'balanced']),
         'boosting_type': hp.choice('boosting_type',
                                    [{'boosting_type': 'gbdt',
-                                     'subsample': hp.uniform('gdbt_subsample', 0.5, 1)},
+#                                     'subsample': hp.uniform('gdbt_subsample', 0.5, 1)
+                                     },
                                     {'boosting_type': 'dart',
-                                     'subsample': hp.uniform('dart_subsample', 0.5, 1)},
+#                                     'subsample': hp.uniform('dart_subsample', 0.5, 1)
+                                     },
                                     {'boosting_type': 'goss'}]),
         'num_leaves': hp.quniform('num_leaves', 30, 150, 1),
         'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(0.2)),
         'subsample_for_bin': hp.quniform('subsample_for_bin', 20000, 300000, 20000),
-        'min_child_samples': hp.quniform('min_child_samples', 20, 500, 5),
         'feature_fraction': hp.uniform('feature_fraction', 0.5, 1),
         'bagging_fraction': hp.uniform('bagging_fraction', 0.5, 1),
         'min_data_in_leaf': hp.qloguniform('min_data_in_leaf', 0, 6, 1),
-        'min_sum_hessian_in_leaf': hp.loguniform('min_sum_hessian_in_leaf', -16, 5),
         'lambda_l1': hp.choice('lambda_l1', [0, hp.loguniform('lambda_l1_positive', -16, 2)]),
         'lambda_l2': hp.choice('lambda_l2', [0, hp.loguniform('lambda_l2_positive', -16, 2)]),
-        'reg_alpha': hp.uniform('reg_alpha', 0.0, 1.0),
-        'reg_lambda': hp.uniform('reg_lambda', 0.0, 1.0),
-        'colsample_bytree': hp.uniform('colsample_by_tree', 0.6, 1.0),
+        'verbose': -1,
+        'subsample': None,
+        'reg_alpha': None,
+        'reg_lambda': None,
+        'min_sum_hessian_in_leaf': None,
+        'min_child_samples': None,
+        'colsample_bytree': None,
+#        'min_child_samples': hp.quniform('min_child_samples', 20, 500, 5),
+#        'min_sum_hessian_in_leaf': hp.loguniform('min_sum_hessian_in_leaf', -16, 5),
+#        'reg_alpha': hp.uniform('reg_alpha', 0.0, 1.0),
+#        'reg_lambda': hp.uniform('reg_lambda', 0.0, 1.0),
+#        'colsample_bytree': hp.uniform('colsample_by_tree', 0.6, 1.0),
     }
     if n_classes > 2:
         space['objective'] = "multiclass"
@@ -154,7 +170,8 @@ def optimize_lgbm(n_classes, max_n_search=None):
                 space=space,
                 algo=tpe.suggest,
                 max_evals=n_trials,
-                trials=trials)
+                trials=trials,
+               verbose= 1)
 
     # find the trial with lowest loss value. this is what we consider the best one
     idx = np.argmin(trials.losses())
@@ -231,4 +248,3 @@ def classify_binary(X_cols, df_train, df_test, y_param):
     misclassified_samples_actual = search_results["misclassified_samples_actual"]
 
     return predictions, oof_predictions, avg_accuracy, misclassified_indices
-

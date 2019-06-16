@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
-def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n_folds, n_classes, fit_params, verbosity):
+def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n_folds, n_classes,
+                                        fit_params, verbosity):
     folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=69)
     #N columns, one per target label. each contains probability of that value
     sub_preds = np.zeros((X_test.shape[0], n_classes))

@@ -149,6 +149,8 @@ print(X_cols)
 
 print(df_train[X_cols].head())
 
+lgbm_optimizer.n_trials = 5
+predictions, oof_predictions, _, misclassified_indices = lgbm_optimizer.classify_binary(X_cols, df_train, df_test, y)
 
 df_losses = pd.DataFrame()
 df_losses["loss"] = lgbm_optimizer.all_losses
@@ -168,8 +170,6 @@ print(df_losses.sort_values(by="loss", ascending=True).head(10))
 
 
 
-lgbm_optimizer.n_trials = 5
-predictions, oof_predictions, _, misclassified_indices = lgbm_optimizer.classify_binary(X_cols, df_train, df_test, y)
 ss = pd.read_csv('gender_submission.csv')
 # predicting only true values, so take column 1 (0 is false column)
 np_preds = np.array(predictions)[:, 1]
