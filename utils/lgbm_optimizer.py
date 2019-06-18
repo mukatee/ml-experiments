@@ -93,14 +93,11 @@ def objective_sklearn(params):
     int_types = ["num_leaves", "min_child_samples", "subsample_for_bin", "min_data_in_leaf"]
     params = convert_int_params(int_types, params)
 
-#    params['colsample_bytree'] = '{:.3f}'.format(params['colsample_bytree'])
-    # Retrieve the subsample if present otherwise set to 1.0
-    subsample = params['boosting_type'].get('subsample', 1.0)
-
     # Extract the boosting type
     params['boosting_type'] = params['boosting_type']['boosting_type']
-    #params['subsample'] = subsample
     #    print("running with params:"+str(params))
+    # Retrieve the subsample if present otherwise set to 1.0
+    #subsample = params['boosting_type'].get('subsample', 1.0)
 
     fit_params = create_fit_params(params)
     if params['objective'] == "binary":
@@ -129,7 +126,7 @@ def optimize_lgbm(n_classes, max_n_search=None):
         'class_weight': hp.choice('class_weight', [None, 'balanced']),
         'boosting_type': hp.choice('boosting_type',
                                    [{'boosting_type': 'gbdt',
-#                                     'subsample': hp.uniform('gdbt_subsample', 0.5, 1)
+#                                     'subsample': hp.uniform('dart_subsample', 0.5, 1)
                                      },
                                     {'boosting_type': 'dart',
 #                                     'subsample': hp.uniform('dart_subsample', 0.5, 1)
@@ -139,19 +136,21 @@ def optimize_lgbm(n_classes, max_n_search=None):
         'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(0.2)),
         'subsample_for_bin': hp.quniform('subsample_for_bin', 20000, 300000, 20000),
         'feature_fraction': hp.uniform('feature_fraction', 0.5, 1),
-        'bagging_fraction': hp.uniform('bagging_fraction', 0.5, 1),
+        'bagging_fraction': hp.uniform('bagging_fraction', 0.5, 1), #alias "subsample"
         'min_data_in_leaf': hp.qloguniform('min_data_in_leaf', 0, 6, 1),
         'lambda_l1': hp.choice('lambda_l1', [0, hp.loguniform('lambda_l1_positive', -16, 2)]),
         'lambda_l2': hp.choice('lambda_l2', [0, hp.loguniform('lambda_l2_positive', -16, 2)]),
         'verbose': -1,
-        'subsample': None,
-        'reg_alpha': None,
-        'reg_lambda': None,
-        'min_sum_hessian_in_leaf': None,
-        'min_child_samples': None,
-        'colsample_bytree': None,
+        #the LGBM parameters docs list various aliases, and the LGBM implementation seems to complain about
+        #the following not being used due to other params, so trying to silence the complaints by setting to None
+        'subsample': None, #overridden by bagging_fraction
+        'reg_alpha': None, #overridden by lambda_l1
+        'reg_lambda': None, #overridden by lambda_l2
+        'min_sum_hessian_in_leaf': None, #overrides min_child_weight
+        'min_child_samples': None, #overridden by min_data_in_leaf
+        'colsample_bytree': None, #overridden by feature_fraction
 #        'min_child_samples': hp.quniform('min_child_samples', 20, 500, 5),
-#        'min_sum_hessian_in_leaf': hp.loguniform('min_sum_hessian_in_leaf', -16, 5),
+        'min_child_weight': hp.loguniform('min_child_weight', -16, 5), #also aliases to min_sum_hessian
 #        'reg_alpha': hp.uniform('reg_alpha', 0.0, 1.0),
 #        'reg_lambda': hp.uniform('reg_lambda', 0.0, 1.0),
 #        'colsample_bytree': hp.uniform('colsample_by_tree', 0.6, 1.0),
@@ -186,7 +185,6 @@ def optimize_lgbm(n_classes, max_n_search=None):
     print(params)
     return params
 
-
 # run a search for exclusive multi-class classification
 def classify_multiclass():
     df_train_sum = pd.read_csv("./test_data/kaggle_careercon_2019/features_train_scaled_sum.csv", nrows=100)
@@ -217,7 +215,6 @@ def classify_multiclass():
     ss['surface'] = encoder.inverse_transform(predictions.argmax(axis=1))
     ss.to_csv('lgbm.csv', index=False)
     ss.head(10)
-
 
 # run a search for binary classification
 def classify_binary(X_cols, df_train, df_test, y_param):
