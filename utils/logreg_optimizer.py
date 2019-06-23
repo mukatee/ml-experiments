@@ -3,21 +3,20 @@ __author__ = 'teemu kanstren'
 import numpy as np
 from hyperopt import hp, tpe, Trials
 from hyperopt.fmin import fmin
-import xgboost as xgb
 import hyperopt
-from opt_utils import *
+from sklearn.linear_model import LogisticRegression
+
 from fit_cv import fit_cv
 from test_predictor import stratified_test_prediction_avg_vote
 
-class XGBOptimizer:
+class LogRegOptimizer:
     # how many CV folds to do on the data
     n_folds = 5
     # max number of rows to use for training (from X and y). to reduce time and compare options faster
     max_n = None
     # max number of trials hyperopt runs
     n_trials = 200
-    #verbosity 0 in RF is quite, 1 = print epoch, 2 = print within epoch
-    #https://stackoverflow.com/questions/31952991/what-does-the-verbosity-parameter-of-a-random-forest-mean-sklearn
+    # ?
     verbosity = 0
     #if true, print summary accuracy/loss after each round
     print_summary = False
@@ -27,13 +26,19 @@ class XGBOptimizer:
     all_params = []
 
     def objective_sklearn(self, params):
-        int_params = ['max_depth']
-        params = convert_int_params(int_params, params)
-        float_params = ['gamma', 'colsample_bytree']
-        params = convert_float_params(float_params, params)
+        #print(params)
+        params.update(params["solver_params"]) #pop nested dict to top level
+        del params["solver_params"] #delete the original nested dict after pop (could pop() above too..)
+        if params["penalty"] == "none":
+            del params["C"]
+            del params["l1_ratio"]
+        elif params["penalty"] != "elasticnet":
+            del params["l1_ratio"]
+        if params["solver"] == "liblinear":
+            params["n_jobs"] = 1
         n_classes = params.pop("num_class")
-
-        score, logloss = fit_cv(self.X, self.y, params, self.fit_params, n_classes, xgb.XGBClassifier,
+#        params = convert_int_params(int_types, params)
+        score, logloss = fit_cv(self.X, self.y, params, self.fit_params, n_classes, LogisticRegression,
                                 self.max_n, self.n_folds, self.print_summary, verbosity=self.verbosity)
         self.all_params.append(params)
         self.all_accuracies.append(score)
@@ -43,28 +48,32 @@ class XGBOptimizer:
         result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
         return result
 
-    def optimize_xgb(self, n_classes):
-        #https://indico.cern.ch/event/617754/contributions/2590694/attachments/1459648/2254154/catboost_for_CMS.pdf
+    def optimize_logreg(self, n_classes):
+        # https://towardsdatascience.com/hyperparameter-tuning-the-random-forest-in-python-using-scikit-learn-28d2aa77dd74
         space = {
-            'max_depth': hp.quniform('max_depth', 2, 10, 1),
-            #removed gblinear since it does not support early stopping and it was getting tricky
-            'booster': hp.choice('booster', ['gbtree', 'dart']),
-            #'booster': hp.choice('booster', ['gbtree', 'gblinear', 'dart']),
-            'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(0.3)),
-            #nthread defaults to maximum so not setting it
-            'subsample': hp.uniform('subsample', 0.75, 1.0),
-            'colsample_bytree': hp.uniform('colsample_bytree', 0.3, 1.0),
-            'colsample_bylevel': hp.uniform('colsample_bylevel', 0.3, 1.0),
-            #'gamma': hp.uniform('gamma', 0.0, 0.5),
-            'min_child_weight': hp.loguniform('min_child_weight', -16, 5),
-            'alpha': hp.choice('alpha', [0, hp.loguniform('alpha_positive', -16, 2)]),
-            'lambda': hp.choice('lambda', [0, hp.loguniform('lambda_positive', -16, 2)]),
-            'gamma': hp.choice('gamma', [0, hp.loguniform('gamma_positive', -16, 2)]),
+            'solver_params': hp.choice('solver_params', [
+                {'solver': 'newton-cg',
+                 'penalty': hp.choice('penalty-ncg', ["l2", 'none'])}, #also multiclass loss supported
+                 {'solver': 'lbfgs',
+                 'penalty': hp.choice('penalty-lbfgs', ["l2", 'none'])},
+                 {'solver': 'liblinear',
+                 'penalty': hp.choice('penalty-liblin', ["l1", "l2"])},
+                 {'solver': 'sag',
+                 'penalty': hp.choice('penalty-sag', ["l2", 'none'])},
+                 {'solver': 'saga',
+                 'penalty': hp.choice('penalty-saga', ["elasticnet", "l1", "l2", 'none'])},
+            ]),
+            'C': hp.uniform('C', 1e-5,10),
+            'tol': hp.uniform('tol', 1e-5, 10),
+            'fit_intercept': hp.choice("fit_intercept", [True, False]),
+            'class_weight': hp.choice("class_weight", ["balanced", None]),
+            #multi-class jos ei bianry
+            'l1_ratio': hp.uniform('l1_ratio', 0.00001, 0.99999), #vain jos elasticnet penalty
+            'n_jobs': -1,
             'num_class': n_classes,
             'verbose': self.verbosity
-            #'n_estimators': 1000   #n_estimators = n_trees -> get error this only valid for gbtree
-            #https://github.com/dmlc/xgboost/issues/3789
         }
+        # save and reload trials for hyperopt state: https://github.com/Vooban/Hyperopt-Keras-CNN-CIFAR-100/blob/master/hyperopt_optimize.py
 
         trials = Trials()
         best = fmin(fn=self.objective_sklearn,
@@ -92,10 +101,10 @@ class XGBOptimizer:
         self.fit_params = {'use_eval_set': False}
 
         # use 2 classes as this is a binary classification
-        params = self.optimize_xgb(2)
+        params = self.optimize_logreg(2)
         print(params)
 
-        clf = xgb.XGBClassifier(**params)
+        clf = LogisticRegression(**params)
 
         search_results = stratified_test_prediction_avg_vote(clf, self.X, self.X_test, self.y,
                                                              n_folds=self.n_folds, n_classes=2, fit_params=self.fit_params)

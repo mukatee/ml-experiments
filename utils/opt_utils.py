@@ -1,5 +1,7 @@
 __author__ = 'teemu kanstren'
 
+import pandas as pd
+
 #check if given parameter can be interpreted as a numerical value
 def is_number(s):
     if s is None:
@@ -14,9 +16,6 @@ def is_number(s):
 #this at least cuts the excess float decimals if they are there
 def convert_int_params(names, params):
     for int_type in names:
-        if int_type not in params:
-            print(f"WARNING: {int_type} not found in parameters: {params}")
-            continue
         #sometimes the parameters can be choices between options or numerical values. like "log2" vs "1-10"
         raw_val = params[int_type]
         if is_number(raw_val):
@@ -31,3 +30,24 @@ def convert_float_params(names, params):
         if is_number(raw_val):
             params[float_type] = '{:.3f}'.format(raw_val)
     return params
+
+def create_misclassified_dataframe(result, y):
+    oof_series = pd.Series(result.oof_predictions[result.misclassified_indices])
+    oof_series.index = y[result.misclassified_indices].index
+    miss_scale_raw = y[result.misclassified_indices] - result.oof_predictions[result.misclassified_indices]
+    miss_scale_abs = abs(miss_scale_raw)
+    df_miss_scale = pd.concat([miss_scale_raw, miss_scale_abs, oof_series, y[result.misclassified_indices]], axis=1)
+    df_miss_scale.columns = ["Raw_Diff", "Abs_Diff", "Prediction", "Actual"]
+    result.df_misses = df_miss_scale
+
+class OptimizerResult:
+    avg_accuracy = None,
+    misclassified_indices = None,
+    misclassified_expected = None,
+    misclassified_actual = None,
+    oof_predictions = None,
+    predictions = None,
+    df_misses = None,
+    all_accuracies = None,
+    all_losses = None,
+    all_params = None,

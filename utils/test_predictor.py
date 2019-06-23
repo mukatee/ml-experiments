@@ -5,14 +5,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from opt_utils import OptimizerResult
 
-def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n_folds, n_classes,
-                                        fit_params, verbosity):
+def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, n_folds, n_classes, fit_params):
     folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=69)
     #N columns, one per target label. each contains probability of that value
     sub_preds = np.zeros((X_test.shape[0], n_classes))
     oof_preds = np.zeros((X_train.shape[0]))
-    score = 0
+    use_eval_set = fit_params.pop("use_eval_set")
     acc_score = 0
     acc_score_total = 0
     misclassified_indices = []
@@ -23,7 +23,7 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n
 
         X_val, y_val = X_train.iloc[test_index], y[test_index]
         if use_eval_set:
-            clf.fit(X_train.iloc[train_index], y[train_index], eval_set=([(X_val, y_val)]), verbose=verbosity, **fit_params)
+            clf.fit(X_train.iloc[train_index], y[train_index], eval_set=([(X_val, y_val)]), **fit_params)
         else:
             #random forest does not know parameter "eval_set" or "verbose"
             clf.fit(X_train.iloc[train_index], y[train_index], **fit_params)
@@ -59,12 +59,11 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, use_eval_set, n
     print(f"sub_preds: {sub_sub}")
     avg_accuracy = acc_score_total / folds.n_splits
     print('Avg Accuracy', avg_accuracy)
-    result = {
-        "avg_accuracy": avg_accuracy,
-        "misclassified_indices": misclassified_indices,
-        "misclassified_samples_expected": misclassified_expected,
-        "misclassified_samples_actual": misclassified_actual,
-        "oof_predictions": oof_preds,
-        "predictions": sub_preds,
-    }
+    result = OptimizerResult()
+    result.avg_accuracy = avg_accuracy
+    result.misclassified_indices = misclassified_indices
+    result.misclassified_expected = misclassified_expected
+    result.misclassified_actual = misclassified_actual
+    result.oof_predictions = oof_preds
+    result.predictions = sub_preds
     return result
