@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
-from opt_utils import OptimizerResult
+from opt_utils import OptimizerResult, create_misclassified_dataframe
+from logreg_optimizer import LogRegOptimizer
 
 def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, n_folds, n_classes, fit_params):
     folds = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=69)
@@ -67,3 +68,35 @@ def stratified_test_prediction_avg_vote(clf, X_train, X_test, y, n_folds, n_clas
     result.oof_predictions = oof_preds
     result.predictions = sub_preds
     return result
+
+
+#example of ensemble input:
+#capture the probabilities of True (1) classification for each classifier, to use as inputs for ensembling:
+#ensemble_input_df = pd.DataFrame()
+#ensemble_input_df["lgbm"] = lgbm_results.predictions[:,1]
+#ensemble_input_df["xgb"] = xgb_results.predictions[:,1]
+#ensemble_input_df["catboost"] = cb_results.predictions[:,1]
+#ensemble_input_df["randomforest"] = rf_results.predictions[:,1]
+#ensemble_input_df.head()
+
+def ensemble_avg(ensemble_input_df, col_names):
+    sum = 0
+    for col_name in col_names:
+        sum += ensemble_input_df[col_name]
+    avg = sum / len(col_names)
+    ensemble_input_df["avg"] = avg
+    result = np.where(ensemble_input_df["avg"] > 0.5, 1, 0)
+    return result
+
+def ensemble_majority(ensemble_input_df, col_names):
+    from scipy.stats import mode
+
+    data = [ensemble_input_df[col_name] for col_name in col_names]
+    majority = mode(data, axis=0)
+    return majority
+
+def ensemble_stack(X_cols, df_train, df_test, target):
+    logreg_opt = LogRegOptimizer()
+    lr_results = logreg_opt.classify_binary(X_cols, df_train, df_test, target)
+    create_misclassified_dataframe(lr_results, target)
+    return lr_results
