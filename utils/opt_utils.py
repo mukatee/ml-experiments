@@ -51,3 +51,4 @@ class OptimizerResult:
     all_accuracies = None,
     all_losses = None,
     all_params = None,
+    best_params = None,

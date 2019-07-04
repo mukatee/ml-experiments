@@ -165,4 +165,5 @@ class LGBMOptimizer:
         search_results.all_accuracies = self.all_accuracies
         search_results.all_losses = self.all_losses
         search_results.all_params = self.all_params
+        search_results.best_params = params
         return search_results

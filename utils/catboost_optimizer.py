@@ -9,6 +9,7 @@ import hyperopt
 from test_predictor import stratified_test_prediction_avg_vote
 from opt_utils import *
 from fit_cv import fit_cv
+import pickle
 
 class CatboostOptimizer:
     # how many CV folds to do on the data
@@ -123,6 +124,7 @@ class CatboostOptimizer:
         search_results.all_accuracies = self.all_accuracies
         search_results.all_losses = self.all_losses
         search_results.all_params = self.all_params
+        search_results.best_params = params
         return search_results
 
 if __name__== "__main__":
@@ -156,4 +158,6 @@ if __name__== "__main__":
     ss['surface'] = encoder.inverse_transform(predictions.argmax(axis=1))
     ss.to_csv('catboost.csv', index=False)
     ss.head(10)
+    with open('catboost_params.pickle', 'wb') as handle:
+        pickle.dump(search_results.best_params, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
