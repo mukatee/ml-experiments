@@ -11,7 +11,7 @@ import hyperopt
 
 from test_predictor import stratified_test_prediction_avg_vote
 from fit_cv import fit_cv
-from opt_utils import *
+from hyperopt_utils import *
 
 class RFOptimizer:
     # how many CV folds to do on the data

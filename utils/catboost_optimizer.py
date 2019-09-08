@@ -7,125 +7,81 @@ import catboost
 from sklearn.preprocessing import LabelEncoder
 import hyperopt
 from test_predictor import stratified_test_prediction_avg_vote
-from opt_utils import *
+from hyperopt_utils import *
 from fit_cv import fit_cv
 import pickle
+
 
 class CatboostOptimizer:
     # how many CV folds to do on the data
     n_folds = 5
-    # max number of rows to use for X and y. to reduce time and compare options faster
-    max_n = None
     # max number of trials hyperopt runs
     n_trials = 200
+    # rows in training data to use to train, subsetting allows training on smaller set if slow
+    train_indices = None
     # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quite?
     verbosity = 0
     # if true, print summary accuracy/loss after each round
     print_summary = False
+    use_gpu = False
+    n_classes = 2
+    classifier = catboost.CatBoostClassifier
+    use_calibration = False
 
     all_accuracies = []
     all_losses = []
     all_params = []
 
     def objective_sklearn(self, params):
-        int_types = ["depth"]
+        int_types = ["depth", "iterations", "early_stopping_rounds"]
         params = convert_int_params(int_types, params)
-        params["iterations"] = 1000
-        params["early_stopping_rounds"] = 10
         if params['bootstrap_type'].lower() != "bayesian":
             # catboost gives error if bootstrap option defined with bootstrap disabled
             del params['bagging_temperature']
 
-        #    n_classes = params["num_class"]
-        n_classes = params.pop("num_class")
+        return hyperopt_objective_run(self, params)
 
-        score, logloss = fit_cv(self.X, self.y, params, self.fit_params, n_classes, catboost.CatBoostClassifier,
-                                self.max_n, self.n_folds, self.print_summary, verbosity=self.verbosity)
-        self.all_params.append(params)
-        self.all_accuracies.append(score)
-        self.all_losses.append(logloss)
-        if self.verbosity == 0:
-            if self.print_summary:
-                print("Score {:.3f}".format(score))
-        else:
-            print("Score {:.3f} params {}".format(score, params))
-        # using logloss here for the loss but uncommenting line below calculates it from average accuracy
-        #    loss = 1 - score
-        loss = logloss
-        result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
-        return result
-
-    def optimize_catboost(self, n_classes, max_n_search):
-        # https://github.com/Microsoft/LightGBM/blob/master/docs/Parameters.rst
-        # https://indico.cern.ch/event/617754/contributions/2590694/attachments/1459648/2254154/catboost_for_CMS.pdf
+    def create_hyperspace(self):
         space = {
             # 'shrinkage': hp.loguniform('shrinkage', -7, 0),
             'depth': hp.quniform('depth', 2, 10, 1),
-            'rsm': hp.uniform('rsm', 0.5, 1),
             'learning_rate': hp.loguniform('learning_rate', np.log(0.01), np.log(0.2)),
             'border_count': hp.qloguniform('border_count', np.log(32), np.log(255), 1),
             # 'ctr_border_count': hp.qloguniform('ctr_border_count', np.log(32), np.log(255), 1),
             'l2_leaf_reg': hp.quniform('l2_leaf_reg', 0, 5, 1),
             'leaf_estimation_method': hp.choice('leaf_estimation_method', ['Newton', 'Gradient']),
-            'bootstrap_type': hp.choice('bootstrap_type', ['Bayesian', 'Bernoulli', 'No']),  # Poisson also possible for GPU
             'bagging_temperature': hp.loguniform('bagging_temperature', np.log(1), np.log(3)),
-            'use_best_model': True
+            'use_best_model': True,
+            'early_stopping_rounds': 10,
+            'iterations': 1000,
+            'feature_border_type': hp.choice('feature_border_type',
+                                             ['Median', 'Uniform', 'UniformAndQuantiles', 'MaxLogSum', 'MinEntropy', 'GreedyLogSum']),
+
             # 'gradient_iterations': hp.quniform('gradient_iterations', 1, 100, 1),
         }
+        if self.use_gpu:
+            space['task_type'] = "GPU"
+            space['bootstrap_type'] = hp.choice('bootstrap_type', ['Bayesian', 'Bernoulli', 'Poisson', 'No'])
+        else:
+            space['task_type'] = "CPU"
+            space['rsm'] = hp.uniform('rsm', 0.5, 1)
+            space['bootstrap_type'] = hp.choice('bootstrap_type', ['Bayesian', 'Bernoulli', 'MVS', 'No'])
 
-        self.max_n = max_n_search
-
-        if n_classes > 2:
+        if self.n_classes > 2:
             space['objective'] = "multiclass"
-            space["num_class"] = n_classes
             space["eval_metric"] = "multi_logloss"
         else:
             space['objective'] = "Logloss"
-            space["num_class"] = 2
-            # space["eval_metric"] = ["Logloss"]
-            # space["num_class"] = 1
-
-        trials = Trials()
-        best = fmin(fn=self.objective_sklearn,
-                    space=space,
-                    algo=tpe.suggest,
-                    max_evals=self.n_trials,
-                    trials=trials)
-
-        # find the trial with lowest loss value. this is what we consider the best one
-        idx = np.argmin(trials.losses())
-        print(idx)
-
-        print(trials.trials[idx])
-
-        params = trials.trials[idx]["result"]["params"]
-        print(params)
-        return params
+        return space
 
     # run a search for binary classification
-    def classify_binary(self, X_cols, df_train, df_test, y_param):
-        self.y = y_param
-
-        self.X = df_train[X_cols]
-        self.X_test = df_test[X_cols]
-
+    def classify_binary(self, X_cols, df_train, df_test, y_param, train_pct = None, stratify_train = None):
+        self.n_classes = 2
         self.fit_params = {'verbose': self.verbosity,
                            'use_eval_set': True}
 
-        # use 2 classes as this is a binary classification
-        # the second param is the number of rows to use for training
-        params = self.optimize_catboost(2, 5000)
-        print(params)
+        return hyperopt_search_classify(self, X_cols, df_train, df_test, y_param, train_pct, stratify_train)
 
-        clf = catboost.CatBoostClassifier(**params)
-
-        search_results = stratified_test_prediction_avg_vote(clf, self.X, self.X_test, self.y,
-                                                             n_folds=self.n_folds, n_classes=2, fit_params=self.fit_params)
-        search_results.all_accuracies = self.all_accuracies
-        search_results.all_losses = self.all_losses
-        search_results.all_params = self.all_params
-        search_results.best_params = params
-        return search_results
 
 if __name__== "__main__":
     df_train_sum = pd.read_csv("./features_train_scaled_sum.csv")
