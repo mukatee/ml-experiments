@@ -60,10 +60,6 @@ class LGBMOptimizer:
         #    print("running with params:"+str(params))
 
         self.fit_params = self.create_fit_params(params)
-        if params['objective'] == "binary":
-            n_classes = 2
-        else:
-            n_classes = params["num_class"]
 
         return hyperopt_objective_run(self, params)
 

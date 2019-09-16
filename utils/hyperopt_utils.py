@@ -125,6 +125,7 @@ def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_p
     return search_results
 
 def hyperopt_objective_run(parent, params):
+    from fit_cv import fit_cv
     score, logloss = fit_cv(parent, parent.X, parent.y, params, parent.fit_params, parent.n_classes, parent.classifier,
                         parent.use_calibration, parent.n_folds, parent.print_summary, verbosity=parent.verbosity,
                        train_indices=parent.train_indices)
