@@ -126,6 +126,8 @@ def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_p
 
 def hyperopt_objective_run(parent, params):
     from fit_cv import fit_cv
+    import time
+    start = time.time()
     score, logloss = fit_cv(parent, parent.X, parent.y, params, parent.fit_params, parent.n_classes, parent.classifier,
                         parent.use_calibration, parent.n_folds, parent.print_summary, verbosity=parent.verbosity,
                        train_indices=parent.train_indices)
@@ -140,5 +142,7 @@ def hyperopt_objective_run(parent, params):
     #using logloss here for the loss but uncommenting line below calculates it from average accuracy
 #    loss = 1 - score
     loss = logloss
-    result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
+    end = time.time()
+    duration = end - start
+    result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK, "duration": duration}
     return result
