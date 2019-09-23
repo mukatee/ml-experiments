@@ -9,7 +9,6 @@ from hyperopt_utils import *
 from fit_cv import fit_cv
 from test_predictor import stratified_test_prediction_avg_vote
 
-
 class XGBOptimizer:
     # how many CV folds to do on the data
     n_folds = 5

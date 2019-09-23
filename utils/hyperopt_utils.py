@@ -61,7 +61,6 @@ import numpy as np
 import pandas as pd
 from hyperopt import hp, tpe, Trials
 from hyperopt.fmin import fmin
-import catboost
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import StratifiedKFold
 import hyperopt
@@ -106,9 +105,6 @@ def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_p
         train_indices, test_indices = train_test_split(parent.X.index, test_size = test_pct, stratify=stratify_train)
         parent.train_indices = train_indices
 
-
-    # use 2 classes as this is a binary classification
-    # the second param is the number of rows to use for training
     params, idx = hyperopt_run_search(parent)
     print(params)
 

@@ -1,0 +1,10 @@
+TODO: hyperopt
+- cv off in search
+- store duration of each search with params
+- allow to skip df_test if not on kaggle :)
+- document how to running test pred separately
+- document in general
+- allow running without feature names, just numpy arrays
+- allow single train/test split
+- track running time with parameters
+- get all parameters used
