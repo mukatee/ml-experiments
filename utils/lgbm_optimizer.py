@@ -20,7 +20,7 @@ class LGBMOptimizer:
     train_indices = None
     # max number of trials hyperopt runs
     n_trials = 200
-    # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quite?
+    # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quiet?
     verbosity = 0
     # if true, print summary accuracy/loss after each round
     print_summary = False

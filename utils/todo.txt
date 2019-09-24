@@ -8,3 +8,5 @@ TODO: hyperopt
 - allow single train/test split
 - track running time with parameters
 - get all parameters used
+- show least important features / write image to disk / table to disk
+- sort output table correct order
