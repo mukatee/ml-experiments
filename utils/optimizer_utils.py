@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import cross_val_score, StratifiedKFold
@@ -10,20 +11,37 @@ from sklearn.metrics import accuracy_score, log_loss
 from sklearn.calibration import CalibratedClassifierCV
 
 
+# a class to hold the results of the optimizer and final classifier run
 class OptimizerResult:
     avg_accuracy = None,
+    # indices of misclassified items/rows in the training set for the final run
     misclassified_indices = None,
+    # the misclassified rows in the training data, so this is the values that should have been predicted
     misclassified_expected = None,
+    # the actual misclassified rows, so the values the were predicted but should not have been
     misclassified_actual = None,
+    # out of fold - predictions. CV predictions over the training data.
     oof_predictions = None,
+    # test set predictions
     predictions = None,
+    # dataframe with some statistics over which items/rows were misclassified and how much
     df_misses = None,
+    # list of accuracies of each hyperopt iteration
     all_accuracies = None,
+    # logloss of each hyperopt iteration
     all_losses = None,
+    # parameters of each hyperopt iteration. the ones selected by hyperopt for the iteration
     all_params = None,
+    #dataframe to hold parameters and metrics over all iterations
+    iteration_df = None,
+    # how much time did it take for each optimization iteration to run
+    iteration_times = [],
+    # the "best" parameters found by hyperopt over all iterations (lowest loss)
     best_params = None,
-    # the final classifier created from optimized hyperparameters, to allow feature weight access etc
+    # the final classifier created from optimized hyperparameters, used to run the final test set prediction, to allow feature weight access etc
+    # this is created with the "best" parameters, trained on the training set, and used to predict on test set
     clf = None,
+
 
 # check if given parameter can be interpreted as a numerical value
 def is_number(s):
@@ -57,16 +75,30 @@ def convert_float_params(names, params):
     return params
 
 
-def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds, n_classes,
-                                        fit_params, train_indices = None, use_calibration = False):
-    folds = StratifiedKFold(n_splits = n_folds, shuffle = True)#, random_state = 69)
-    #for results. N columns, one per target label. each contains probability of that value
-    #sub_preds is for submission predictions, for the "real" test
+# run n-fold training and prediction on the train and test data
+# params:
+# parent:  the optimizer for specific classifier. see this repo/other scripts for examples
+# clf:     the actual classifier instance to use
+
+# def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds, n_classes,
+#                                        fit_params, train_indices=None, use_calibration=False):
+def stratified_test_prediction_avg_vote(parent, clf):
+    n_folds = parent.n_folds
+    X_test = parent.X_test
+    X_train = parent.X
+    y = parent.y
+    n_classes = parent.n_classes
+    fit_params = parent.fit_params
+    train_indices = parent.train_indices
+    use_calibration = parent.use_calibration
+
+    folds = StratifiedKFold(n_splits = n_folds, shuffle = True)  # , random_state = 69)
+    # for results. N columns, one per target label. each contains probability of that value
+    # sub_preds is for submission predictions, for the "real" test
     sub_preds = np.zeros((X_test.shape[0], n_classes))
-    #oof is for out-of-fold predictions. CV predictions over the training data
+    # oof is for out-of-fold predictions. CV predictions over the training data
     oof_preds = np.zeros((X_train.shape[0]))
     use_eval_set = fit_params.pop("use_eval_set")
-    acc_score = 0
     acc_score_total = 0
     misclassified_indices = []
     misclassified_expected = []
@@ -79,7 +111,7 @@ def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds
         X_train = X_train.reset_index(drop = True)
         y = y.reset_index(drop = True)
 
-    #some classifiers like SGD require calibratedclassifier to give probabilities
+    # some classifiers like SGD require calibratedclassifier to give probabilities
     if use_calibration:
         clf = CalibratedClassifierCV(clf, cv = 5, method = 'sigmoid')
 
@@ -87,20 +119,20 @@ def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds
         print('-' * 20, i, '-' * 20)
 
         X_val, y_val = X_train.iloc[test_index], y[test_index]
-        if use_eval_set:
-            clf.fit(X_train.iloc[train_index], y[train_index], eval_set = ([(X_val, y_val)]), **fit_params)
-        else:
-            #some classifiers, e.g., random forest, do not know parameter "eval_set" or "verbose"
-            clf.fit(X_train.iloc[train_index], y[train_index], **fit_params)
-        #using predict_probe instead of predict to get probabilities that can be converted or not as needed
-        oof_preds[test_index] = clf.predict_proba(X_train.iloc[test_index])[:, 1].flatten()
-        #if we were asked to train only on part of the data, predict on the left-out part as well
-        #to produce a full result set in the end
+        preds = do_fit(clf, use_calibration, use_eval_set, X_train.iloc[train_index], y[train_index], X_val, y_val, fit_params)
+
+        # using predict_proba instead of predict to get probabilities that can be converted or not as needed
+        oof_preds[test_index] = preds[:, 1].flatten()
+        # if we were asked to train only on part of the data, predict on the left-out part as well
+        # to produce a full result set in the end
         if train_indices is not None:
             extra_test_index = X_train_full.drop(train_indices).index
-            oof_preds[extra_test_index] = clf.predict_proba(X_train_full.iloc[extra_test_index])[:, 1].flatten()
+            print("doing extra predictions for left-over training data")
+            extra_preds = clf.predict_proba(X_train_full.iloc[extra_test_index])[:, 1].flatten()
+            oof_preds[extra_test_index] += extra_preds / n_folds
 
-        #n folds, so going to add only n:th fraction here
+        # n folds, so going to add only n:th fraction here
+        print("predicting on the validation set")
         sub_preds += clf.predict_proba(X_test) / folds.n_splits
         preds_this_round = oof_preds[test_index] >= 0.5
         acc_score = accuracy_score(y[test_index], preds_this_round)
@@ -110,32 +142,41 @@ def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds
             importances = clf.feature_importances_
             features = X_train.columns
 
-            feat_importances = pd.Series(importances, index = features)
-            #feat_importances.nlargest(50).sort_values().to_frame().to_csv(f"top_features_{i}.csv")
-            feat_importances.sort_values(ascending=True).to_frame().to_csv(f"top_features_{i}.csv")
-            feat_importances.nlargest(30).sort_values().plot(kind = 'barh', color = '#86bf91', figsize = (10, 8))
+            feat_importances = pd.DataFrame()
+            feat_importances["weight"] = importances
+            feat_importances.index = features
+#            feat_importances = pd.DataFrame([features,importances], columns=["feature", "weight"])
+#            feat_importances["feature"] = features
+            # feat_importances.nlargest(50).sort_values().to_frame().to_csv(f"top_features_{i}.csv")
+            feat_importances.sort_values(by="weight", ascending = False).to_csv(f"top_features_{i}.csv")
+#            feat_importances.nlargest(30, ["weight"]).sort_values(by="weight").plot(kind = 'barh', color = '#86bf91', figsize = (10, 8))
+            feat_importances.nlargest(30, ["weight"]).sort_values(by="weight").plot(kind = 'barh', title=f"top features {i}", color = '#86bf91', figsize = (10, 8))
+            #kaggle shows output image files (like this png) under "output visualizations", others under "output"
+            plt.savefig(f'feature-weights-{i}.png')
+            plt.savefig(f'feature-weights-{i}.pdf')
             plt.show()
         else:
             print("classifier has no feature importances: skipping feature plot")
 
         missed = y[test_index] != preds_this_round
         misclassified_indices.extend(test_index[missed])
-        #this is the set we expected to predict
+        # this is the set we expected to predict
         m1 = y[test_index][missed]
         misclassified_expected.append(m1)
-        #this is the set we actually predicted
+        # this is the set we actually predicted
         m2 = oof_preds[test_index][missed].astype("int")
         misclassified_actual.append(m2)
         if hasattr(parent, 'cleanup'):
-            #if the parent optimizer implements iteration cleanup, call it
+            # if the parent optimizer implements iteration cleanup, call it
+            print("parent cleanup")
             parent.cleanup(clf)
 
-    #print(f"acc_score: {acc_score}")
+    # print(f"acc_score: {acc_score}")
     sub_sub = sub_preds[:5]
     print(f"predictions on the submisson set first 5 rows: {sub_sub}")
     avg_accuracy = acc_score_total / folds.n_splits
     print('Avg Accuracy', avg_accuracy)
-    #not we store the actual results in a single object and return that
+    # not we store the actual results in a single object and return that
     result = OptimizerResult()
     result.avg_accuracy = avg_accuracy
     result.misclassified_indices = misclassified_indices
@@ -146,6 +187,11 @@ def stratified_test_prediction_avg_vote(parent, clf, X_train, X_test, y, n_folds
     create_misclassified_dataframe(result, y)
     return result
 
+
+# create a dataframe with statistics on which rows were misclassified. add it to the given results object.
+# params:
+# result: OptimizerResults instance, already initialized with raw misclassification data
+# y: the "real" target values that should have been predicted
 def create_misclassified_dataframe(result, y):
     oof_series = pd.Series(result.oof_predictions[result.misclassified_indices])
     oof_series.index = y[result.misclassified_indices].index
@@ -158,8 +204,21 @@ def create_misclassified_dataframe(result, y):
 
 # run n_folds of cross validation on the data
 # averages fold results
-def fit_cv(parent, X, y, params, fit_params, n_classes, classifier, use_calibration,
-           n_folds, print_summary, verbosity, train_indices):
+# params:
+# op: see OptimizationParameters
+
+def fit_cv(parent, params):
+    n_folds = parent.n_folds
+    X = parent.X
+    y = parent.y
+    n_classes = parent.n_classes
+    fit_params = parent.fit_params
+    train_indices = parent.train_indices
+    use_calibration = parent.use_calibration
+    classifier = parent.classifier
+    verbosity = parent.verbosity
+    print_summary = parent.print_summary
+
     X_full = X
     y_full = y
     # cut the data if max_n is set
@@ -185,18 +244,13 @@ def fit_cv(parent, X, y, params, fit_params, n_classes, classifier, use_calibrat
         X_train, y_train = X.iloc[train_index], y[train_index]
         X_test, y_test = X.iloc[test_index], y[test_index]
         clf = classifier(**params)
-        if use_calibration:
-            clf = CalibratedClassifierCV(clf, cv = 5, method = 'sigmoid')
-        # verbose = print loss at every "verbose" rounds.
-        # if 100 it prints progress 100,200,300,... iterations
-        if use_eval:
-            clf.fit(X_train, y_train, eval_set = (X_test, y_test), **fit_params)
-        else:
-            clf.fit(X_train, y_train, **fit_params)
-        oof_preds[test_index] = clf.predict_proba(X.iloc[test_index])
+
+        preds = do_fit(clf, use_calibration, use_eval, X_train, y_train, X_test, y_test, fit_params)
+        oof_preds[test_index] = preds
+
         if train_indices is not None:
             extra_indices = X_full.drop(train_indices).index
-            oof_preds[extra_indices] = clf.predict_proba(X_full.iloc[extra_indices])
+            oof_preds[extra_indices] += clf.predict_proba(X_full.iloc[extra_indices]) / n_folds
 
         acc_score += accuracy_score(y[test_index], oof_preds[test_index][:, 1] >= 0.5)
         if hasattr(parent, 'cleanup'):
@@ -210,10 +264,40 @@ def fit_cv(parent, X, y, params, fit_params, n_classes, classifier, use_calibrat
     return total_acc_score, logloss
 
 
+# fit a given classifier using given configuration / parameters
+def do_fit(clf, use_calibration, use_eval, X_train, y_train, X_test, y_test, fit_params):
+    if use_calibration:
+        clf = CalibratedClassifierCV(clf, cv = 5, method = 'sigmoid')
+    # verbose = print loss at every "verbose" rounds.
+    # if 100 it prints progress 100,200,300,... iterations
+    if use_eval:
+        clf.fit(X_train, y_train, eval_set = (X_test, y_test), **fit_params)
+    else:
+        clf.fit(X_train, y_train, **fit_params)
+    preds = clf.predict_proba(X_test)
+    return preds
+
+
 # run n_folds of cross validation on the data
 # averages fold results
-def run_iteration(parent, X, y, params, fit_params, n_classes, classifier, use_calibration,
-                  n_folds, print_summary, verbosity):
+# parent = parent optimizer instance for a specific classifier,
+# params = parameters to give to actual classifier constructor when creating object
+def run_iteration(parent, params):
+    n_folds = parent.n_folds
+    X = parent.X
+    y = parent.y
+    fit_params = parent.fit_params
+    use_calibration = parent.use_calibration
+    classifier = parent.classifier
+    print_summary = parent.print_summary
+
+    # cut the data if max_n is set
+    if parent.train_indices is not None:
+        X = X.iloc[parent.train_indices]
+        y = y.iloc[parent.train_indices]
+
+    X = X.reset_index(drop = True)
+    y = y.reset_index(drop = True)
     print(X.shape)
     fit_params = fit_params.copy()
     use_eval = fit_params.pop("use_eval_set")
@@ -226,15 +310,7 @@ def run_iteration(parent, X, y, params, fit_params, n_classes, classifier, use_c
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = test_set_size)
 
     clf = classifier(**params)
-    if use_calibration:
-        clf = CalibratedClassifierCV(clf, cv = 5, method = 'sigmoid')
-    # verbose = print loss at every "verbose" rounds.
-    # if 100 it prints progress 100,200,300,... iterations
-    if use_eval:
-        clf.fit(X_train, y_train, eval_set = (X_test, y_test), **fit_params)
-    else:
-        clf.fit(X_train, y_train, **fit_params)
-    preds = clf.predict_proba(X_test)
+    preds = do_fit(clf, use_calibration, use_eval, X_train, y_train, X_test, y_test, fit_params)
 
     acc_score += accuracy_score(y_test, preds[:, 1] >= 0.5)
     if hasattr(parent, 'cleanup'):
@@ -247,6 +323,7 @@ def run_iteration(parent, X, y, params, fit_params, n_classes, classifier, use_c
     return total_acc_score, logloss
 
 
+# run the overall search
 def hyperopt_run_search(parent):
     space = parent.create_hyperspace()
     trials = Trials()
@@ -267,11 +344,20 @@ def hyperopt_run_search(parent):
     return params, idx
 
 
-def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_pct, stratify_train):
-    parent.y = y_param
+# this is the actual method to start the optimization process
+# params:
+# parent: the optimizer instance for a specific classifier being optimized. check the classes in this repo/other scipts
+# X_cols: set of columns/features to pick from the training data for training.
+# df_train: the training data. will be split to train/validation sets
+# df_test: separate test set to predict on at the end
+# y: the target variable data
+# train_pct: the percentage of training data to use. if None, use all. if 0-1, use that percentage. If > 1 or < 0, likely crash.
+# stratify_train: if defined, stratify the train/test split on this data. typically this would be equal to "y" param (target).
+def hyperopt_search_classify(parent, X_cols, df_train, df_test, y, train_pct, stratify_train):
+    # store parameter values in parent optimizer object, as that is available to use when hyperopt starts a classifier iteration
+    parent.y = y
     parent.X = df_train[X_cols]
     parent.X_test = df_test[X_cols]
-    # convert train_pct into percentage to drop, i.e. the test set from split
 
     # resetting index since sliced dataframes can cause issues in stratified split indexing later
     # this might be something to consider in special cases
@@ -279,6 +365,7 @@ def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_p
     parent.X_test = parent.X_test.reset_index(drop = True)
     parent.y = parent.y.reset_index(drop = True)
 
+    # convert train_pct into percentage to drop, i.e. the test set from split
     if train_pct is not None:
         test_pct = 1 - train_pct
         train_indices, test_indices = train_test_split(parent.X.index, test_size = test_pct, stratify = stratify_train)
@@ -289,28 +376,44 @@ def hyperopt_search_classify(parent, X_cols, df_train, df_test, y_param, train_p
 
     clf = parent.classifier(**params)
 
-    search_results = stratified_test_prediction_avg_vote(parent, clf, parent.X, parent.X_test, parent.y, n_folds = parent.n_folds,
-                                                         n_classes = parent.n_classes, fit_params = parent.fit_params,
-                                                         train_indices = parent.train_indices, use_calibration = parent.use_calibration)
+    search_results = stratified_test_prediction_avg_vote(parent, clf)
     search_results.all_accuracies = parent.all_accuracies
     search_results.all_losses = parent.all_losses
     search_results.all_params = parent.all_params
+    search_results.all_times = parent.all_times
     search_results.best_params = params
     search_results.clf = clf
+
+    df_rows = []
+    for idx, val in enumerate(search_results.all_params):
+        param_dict = val.copy()
+        df_rows.append(param_dict)
+    iteration_df = pd.DataFrame(df_rows)
+    iteration_df["g_accuracy"] = search_results.all_accuracies
+    iteration_df["g_loss"] = search_results.all_losses
+    iteration_df["g_duration"] = search_results.all_times
+    search_results.iteration_df = iteration_df
+    iteration_df.to_csv("iterations.csv")
+
     return search_results
 
 
+# called from the optimizer from the objective_sklearn() function to proceed with running the hyperopt iteration
+# parent = optimizer parent
+# params = constructor parameters for classifier
+# use_cv = if true, run this iteration using n-fold cross-validatiom. else just on train-test split. generally much faster.
 def hyperopt_objective_run(parent, params, use_cv = False):
+    start = time.time()
     if use_cv:
-        score, logloss = fit_cv(parent, parent.X, parent.y, params, parent.fit_params, parent.n_classes, parent.classifier,
-                                parent.use_calibration, parent.n_folds, parent.print_summary, verbosity = parent.verbosity,
-                                train_indices = parent.train_indices)
+        score, logloss = fit_cv(parent, params)
     else:
-        score, logloss = run_iteration(parent, parent.X, parent.y, params, parent.fit_params, parent.n_classes, parent.classifier,
-                                       parent.use_calibration, parent.n_folds, parent.print_summary, verbosity = parent.verbosity)
+        score, logloss = run_iteration(parent, params)
+    end = time.time()
+    diff = end - start
     parent.all_params.append(params)
     parent.all_accuracies.append(score)
     parent.all_losses.append(logloss)
+    parent.all_times.append(diff)
     if parent.verbosity == 0:
         if parent.print_summary:
             print("Score {:.3f}".format(score))
