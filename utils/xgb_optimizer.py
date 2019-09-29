@@ -16,18 +16,19 @@ class XGBOptimizer:
     n_trials = 200
     # rows in training data to use to train, subsetting allows training on smaller set if slow
     train_indices = None
-    # verbosity 0 in RF is quite, 1 = print epoch, 2 = print within epoch
-    # https://stackoverflow.com/questions/31952991/what-does-the-verbosity-parameter-of-a-random-forest-mean-sklearn
+    xgb_verbosity = 0
     verbosity = 0
     # if true, print summary accuracy/loss after each round
     print_summary = False
     n_classes = 2
     classifier = xgb.XGBClassifier
     use_calibration = False
+    scale_pos_weight = None
 
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def cleanup(self, clf):
         # print("cleaning up..")
@@ -63,7 +64,7 @@ class XGBOptimizer:
             'alpha': hp.choice('alpha', [0, hp.loguniform('alpha_positive', -16, 2)]),
             'lambda': hp.choice('lambda', [0, hp.loguniform('lambda_positive', -16, 2)]),
             'gamma': hp.choice('gamma', [0, hp.loguniform('gamma_positive', -16, 2)]),
-            'verbose': self.verbosity,
+            'verbose': self.xgb_verbosity,
             'n_jobs': 4,
             # tree_method: 'gpu_hist' causes xgboost to use GPU. comment in/out if needed
             # https://xgboost.readthedocs.io/en/latest/gpu/
@@ -71,6 +72,8 @@ class XGBOptimizer:
             # 'n_estimators': 1000   #n_estimators = n_trees -> get error this only valid for gbtree
             # https://github.com/dmlc/xgboost/issues/3789
         }
+        if self.scale_pos_weight is not None:
+            space["scale_pos_weight"] = self.scale_pos_weight
         return space
 
     # run a search for binary classification

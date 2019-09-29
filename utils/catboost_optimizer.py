@@ -1,16 +1,8 @@
 __author__ = 'teemu kanstren'
 
-import numpy as np
-from hyperopt import hp, tpe, Trials
-from hyperopt.fmin import fmin
 import catboost
-from sklearn.preprocessing import LabelEncoder
-import hyperopt
-from test_predictor import stratified_test_prediction_avg_vote
-from hyperopt_utils import *
-from fit_cv import fit_cv
+from optimizer_utils import *
 import pickle
-
 
 class CatboostOptimizer:
     # how many CV folds to do on the data
@@ -19,7 +11,7 @@ class CatboostOptimizer:
     n_trials = 200
     # rows in training data to use to train, subsetting allows training on smaller set if slow
     train_indices = None
-    # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quite?
+    cb_verbosity = 0
     verbosity = 0
     # if true, print summary accuracy/loss after each round
     print_summary = False
@@ -27,10 +19,13 @@ class CatboostOptimizer:
     n_classes = 2
     classifier = catboost.CatBoostClassifier
     use_calibration = False
+    cat_features = None
+    scale_pos_weight = None
 
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def objective_sklearn(self, params):
         int_types = ["depth", "iterations", "early_stopping_rounds"]
@@ -72,12 +67,15 @@ class CatboostOptimizer:
             space["eval_metric"] = "multi_logloss"
         else:
             space['objective'] = "Logloss"
+        if self.scale_pos_weight is not None:
+            space["scale_pos_weight"] = self.scale_pos_weight
         return space
 
     # run a search for binary classification
     def classify_binary(self, X_cols, df_train, df_test, y_param, train_pct = None, stratify_train = None):
         self.n_classes = 2
-        self.fit_params = {'verbose': self.verbosity,
+        self.fit_params = {'verbose': self.cb_verbosity,
+                           'cat_features': self.cat_features,
                            'use_eval_set': True}
 
         return hyperopt_search_classify(self, X_cols, df_train, df_test, y_param, train_pct, stratify_train)

@@ -1,16 +1,7 @@
 __author__ = 'teemu kanstren'
 
-import numpy as np
-import pandas as pd
-from hyperopt import hp, tpe, Trials
-from hyperopt.fmin import fmin
-from sklearn.preprocessing import LabelEncoder
-from sklearn.model_selection import StratifiedKFold
 from sklearn.ensemble import RandomForestClassifier
-import hyperopt
 
-from test_predictor import stratified_test_prediction_avg_vote
-from fit_cv import fit_cv
 from hyperopt_utils import *
 
 class RFOptimizer:
@@ -23,15 +14,16 @@ class RFOptimizer:
     n_trials = 200
     #verbosity 0 in RF is quite, 1 = print epoch, 2 = print within epoch
     #https://stackoverflow.com/questions/31952991/what-does-the-verbosity-parameter-of-a-random-forest-mean-sklearn
+    rf_verbosity = 0
     verbosity = 0
-    #if true, print summary accuracy/loss after each round
-    print_summary = False
+
     classifier = RandomForestClassifier
     use_calibration = False
 
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def objective_sklearn(self, params):
         int_types = ["n_estimators", "min_samples_leaf", "min_samples_split", "max_features"]
@@ -53,7 +45,7 @@ class RFOptimizer:
             'class_weight': hp.choice('class_weight', ["balanced", None]),
             'n_estimators': hp.quniform('n_estimators', 200, 2000, 200),
             'n_jobs': -1,
-            'verbose': self.verbosity
+            'verbose': self.rf_verbosity
         }
         # save and reload trials for hyperopt state: https://github.com/Vooban/Hyperopt-Keras-CNN-CIFAR-100/blob/master/hyperopt_optimize.py
 

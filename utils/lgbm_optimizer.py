@@ -1,16 +1,7 @@
 __author__ = 'teemu kanstren'
 
-import numpy as np
-from sklearn.model_selection import StratifiedKFold
 import lightgbm as lgbm
-from hyperopt import hp, tpe, Trials
-from hyperopt.fmin import fmin
-import pandas as pd
-from sklearn.preprocessing import LabelEncoder
-import hyperopt
-from test_predictor import stratified_test_prediction_avg_vote
 from hyperopt_utils import *
-from fit_cv import fit_cv
 
 
 class LGBMOptimizer:
@@ -21,16 +12,17 @@ class LGBMOptimizer:
     # max number of trials hyperopt runs
     n_trials = 200
     # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quiet?
+    lgbm_verbosity = 0
     verbosity = 0
-    # if true, print summary accuracy/loss after each round
-    print_summary = False
     n_classes = 2
     classifier = lgbm.LGBMClassifier
     use_calibration = False
+    scale_pos_weight = None
 
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def create_fit_params(self, params):
         using_dart = params['boosting_type'] == "dart"
@@ -46,7 +38,7 @@ class LGBMOptimizer:
             fit_params["early_stopping_rounds"] = 100
         params["n_estimators"] = n_estimators
         fit_params['use_eval_set'] = True
-        fit_params['verbose'] = self.verbosity
+        fit_params['verbose'] = self.lgbm_verbosity
         return fit_params
 
     # this is the objective function the hyperopt aims to minimize
@@ -107,6 +99,8 @@ class LGBMOptimizer:
         else:
             space['objective'] = "binary"
             # space["num_class"] = 1
+        if self.scale_pos_weight is not None:
+            space["scale_pos_weight"] = self.scale_pos_weight
         return space
 
     # run a search for binary classification

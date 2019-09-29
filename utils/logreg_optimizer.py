@@ -18,15 +18,15 @@ class LogRegOptimizer:
     # max number of trials hyperopt runs
     n_trials = 200
     n_classes = 2
+    lr_verbosity = 0
     verbosity = 0
-    #if true, print summary accuracy/loss after each round
-    print_summary = False
     classifier = LogisticRegression
     use_calibration = False
 
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def objective_sklearn(self, params):
         #print(params)
@@ -64,7 +64,7 @@ class LogRegOptimizer:
             'l1_ratio': hp.uniform('l1_ratio', 0.00001, 0.99999), #vain jos elasticnet penalty
             'n_jobs': -1,
             'num_class': self.n_classes,
-            'verbose': self.verbosity
+            'verbose': self.lr_verbosity
         }
         return space
 

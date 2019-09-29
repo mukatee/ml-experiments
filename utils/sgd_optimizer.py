@@ -1,6 +1,7 @@
 __author__ = 'teemu kanstren'
 
 from sklearn.linear_model import SGDClassifier
+from hyperopt_utils import *
 
 class SGDOptimizer:
     # how many CV folds to do on the data
@@ -11,10 +12,9 @@ class SGDOptimizer:
     n_trials = 200
     # rows in training data to use to train, subsetting allows training on smaller set if slow
     train_indices = None
-    # verbosity in LGBM is how often progress is printed. with 100=print progress every 100 rounds. 0 is quite?
+    sgd_verbosity = 0
     verbosity = 0
-    # if true, print summary accuracy/loss after each round
-    print_summary = False
+
     n_classes = 2
     classifier = SGDClassifier
     use_calibration = True
@@ -22,6 +22,7 @@ class SGDOptimizer:
     all_accuracies = []
     all_losses = []
     all_params = []
+    all_times = []
 
     def objective_sklearn(self, params):
         int_types = ["n_iter_no_change", "max_iter"]
@@ -53,7 +54,7 @@ class SGDOptimizer:
             'learning_rate': hp.choice('learning_rate', ['optimal', 'adaptive']),
             'eta0': 0.001,
             'validation_fraction': 0.1,
-            'verbose': self.verbosity,
+            'verbose': self.sgd_verbosity,
             'class_weight': hp.choice('class_weight', ['balanced', None]),
         }
         return space
