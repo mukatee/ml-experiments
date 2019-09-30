@@ -1,13 +1,7 @@
 __author__ = 'teemu kanstren'
 
-import numpy as np
-from hyperopt import hp, tpe, Trials
-from hyperopt.fmin import fmin
 import xgboost as xgb
-import hyperopt
 from hyperopt_utils import *
-from fit_cv import fit_cv
-from test_predictor import stratified_test_prediction_avg_vote
 
 class XGBOptimizer:
     # how many CV folds to do on the data
@@ -21,6 +15,7 @@ class XGBOptimizer:
     # if true, print summary accuracy/loss after each round
     print_summary = False
     n_classes = 2
+    use_gpu = False
     classifier = xgb.XGBClassifier
     use_calibration = False
     scale_pos_weight = None
@@ -36,9 +31,6 @@ class XGBOptimizer:
         clf._Booster.__del__()
         import gc
         gc.collect()
-
-    #        print(dir(clf))
-    #        clf.del()
 
     def objective_sklearn(self, params):
         int_params = ['max_depth']
@@ -66,12 +58,14 @@ class XGBOptimizer:
             'gamma': hp.choice('gamma', [0, hp.loguniform('gamma_positive', -16, 2)]),
             'verbose': self.xgb_verbosity,
             'n_jobs': 4,
-            # tree_method: 'gpu_hist' causes xgboost to use GPU. comment in/out if needed
-            # https://xgboost.readthedocs.io/en/latest/gpu/
-            'tree_method': 'gpu_hist',
+            # 'tree_method': 'gpu_hist',
             # 'n_estimators': 1000   #n_estimators = n_trees -> get error this only valid for gbtree
             # https://github.com/dmlc/xgboost/issues/3789
         }
+        if self.use_gpu:
+            # tree_method: 'gpu_hist' causes xgboost to use GPU.
+            # https://xgboost.readthedocs.io/en/latest/gpu/
+            space["tree_method"] = "gpu_hist"
         if self.scale_pos_weight is not None:
             space["scale_pos_weight"] = self.scale_pos_weight
         return space

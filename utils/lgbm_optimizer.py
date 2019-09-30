@@ -3,7 +3,6 @@ __author__ = 'teemu kanstren'
 import lightgbm as lgbm
 from hyperopt_utils import *
 
-
 class LGBMOptimizer:
     # how many CV folds to do on the data
     n_folds = 5
@@ -98,7 +97,6 @@ class LGBMOptimizer:
             space['objective'] = "multiclass"
         else:
             space['objective'] = "binary"
-            # space["num_class"] = 1
         if self.scale_pos_weight is not None:
             space["scale_pos_weight"] = self.scale_pos_weight
         return space

@@ -452,6 +452,7 @@ def hyperopt_objective_run(parent, params, use_cv=False):
 
     # using logloss here for the loss but uncommenting line below calculates it from average accuracy
     #    loss = 1 - score
+    #or replace with anything else you want to "minimize"
     loss = logloss
     result = {"loss": loss, "score": score, "params": params, 'status': hyperopt.STATUS_OK}
     return result

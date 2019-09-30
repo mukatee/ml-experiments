@@ -12,7 +12,7 @@ class RFOptimizer:
     n_classes = 2
     # max number of trials hyperopt runs
     n_trials = 200
-    #verbosity 0 in RF is quite, 1 = print epoch, 2 = print within epoch
+    #verbosity 0 in RF is quiet, 1 = print epoch, 2 = print within epoch
     #https://stackoverflow.com/questions/31952991/what-does-the-verbosity-parameter-of-a-random-forest-mean-sklearn
     rf_verbosity = 0
     verbosity = 0
