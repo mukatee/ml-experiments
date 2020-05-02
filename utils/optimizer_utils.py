@@ -163,7 +163,7 @@ def stratified_test_prediction_avg_vote(parent, clf):
 
         # n folds, so going to add only n:th fraction here
         vprint(verbosity, start, f"predicting on the validation set: {X_test.shape} rows")
-        sub_preds += predict_in_batches(clf, X_test, n_classes, verbosity, start)
+        sub_preds += predict_in_batches(clf, X_test, n_classes, verbosity, start) / n_folds
         #sub_preds += clf.predict_proba(X_test) / folds.n_splits
         preds_this_round = oof_preds[test_index] >= 0.5
         acc_score = accuracy_score(y[test_index], preds_this_round)
@@ -176,11 +176,7 @@ def stratified_test_prediction_avg_vote(parent, clf):
             feat_importances = pd.DataFrame()
             feat_importances["weight"] = importances
             feat_importances.index = features
-            #            feat_importances = pd.DataFrame([features,importances], columns=["feature", "weight"])
-            #            feat_importances["feature"] = features
-            # feat_importances.nlargest(50).sort_values().to_frame().to_csv(f"top_features_{i}.csv")
             feat_importances.sort_values(by="weight", ascending=False).to_csv(f"top_features_{i}.csv")
-            #            feat_importances.nlargest(30, ["weight"]).sort_values(by="weight").plot(kind = 'barh', color = '#86bf91', figsize = (10, 8))
             feat_importances.nlargest(30, ["weight"]).sort_values(by="weight").plot(kind='barh', title=f"top features {i}", color='#86bf91', figsize=(10, 8))
             # kaggle shows output image files (like this png) under "output visualizations", others (such as pdf) under "output"
             plt.savefig(f'feature-weights-{i}.png')
@@ -215,6 +211,7 @@ def stratified_test_prediction_avg_vote(parent, clf):
     result.misclassified_actual = misclassified_actual
     result.oof_predictions = oof_preds
     result.predictions = sub_preds
+    result.clf = clf
     create_misclassified_dataframe(result, y)
     return result
 
@@ -236,7 +233,9 @@ def create_misclassified_dataframe(result, y):
 # run n_folds of cross validation on the data
 # averages fold results
 # params:
-# op: see OptimizationParameters
+# parent: parent optimizer instance
+# params: constructor parameters for classifier used
+# start_time: for tracking execution time for logs
 
 def fit_cv(parent, params, start_time=time.time()):
     n_folds = parent.n_folds
@@ -299,8 +298,6 @@ def fit_cv(parent, params, start_time=time.time()):
 def do_fit(clf, use_calibration, use_eval, X_train, y_train, X_test, y_test, fit_params, n_classes, verbosity, start_time):
     if use_calibration:
         clf = CalibratedClassifierCV(clf, cv=5, method='sigmoid')
-    # verbose = print loss at every "verbose" rounds.
-    # if 100 it prints progress 100,200,300,... iterations
     vprint(verbosity, start_time, f"fitting in do_fit, eval={use_eval}, data size={X_train.shape}")
     if use_eval:
         clf.fit(X_train, y_train, eval_set=(X_test, y_test), **fit_params)
