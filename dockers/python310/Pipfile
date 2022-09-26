@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.python.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+pandas = "*"
+numpy = "*"
+jupyter = "*"
+pyarrow = "*"
+pydicom = "*"
+plotly = "*"
+scipy = "*"
+matplotlib = "*"
+scikit-image = "*"
+tqdm = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"
